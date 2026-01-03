@@ -34,8 +34,8 @@ nav { background-color: var(--primary); padding: 15px 20px; display: flex; justi
 .btn-danger { background-color: var(--danger); color: white; }
 .btn-warning { background-color: var(--warning); color: white; }
 .btn-ai { background-color: var(--ai-color); color: white; }
-.btn-outline { background: transparent; border: 1px solid var(--secondary); color: var(--secondary); } /* Fixed visibility on white bg */
-nav .btn-outline { border-color: white; color: white; } /* Outline buttons in nav are white */
+.btn-outline { background: transparent; border: 1px solid var(--secondary); color: var(--secondary); }
+nav .btn-outline { border-color: white; color: white; }
 .btn-outline:hover { background: rgba(0,0,0,0.05); }
 nav .btn-outline:hover { background: rgba(255,255,255,0.1); }
 
@@ -51,7 +51,7 @@ nav .btn-outline:hover { background: rgba(255,255,255,0.1); }
 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
 .auth-box { max-width: 900px; margin: 30px auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-#section-user-auth .auth-box, #section-admin-login .auth-box { max-width: 400px; } /* Smaller box for login */
+#section-user-auth .auth-box, #section-admin-login .auth-box { max-width: 400px; }
 
 .tab-row { display: flex; margin-bottom: 20px; }
 .tab-btn { flex: 1; padding: 10px; border: none; background: #eee; cursor: pointer; }
@@ -67,19 +67,23 @@ table { width: 100%; border-collapse: collapse; min-width: 600px; }
 thead { background-color: var(--primary); color: white; }
 th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #eee; font-size: 14px; }
 tbody tr:hover { background-color: #f8f9fa; }
-tbody tr:last-child td { border-bottom: none; }
-td button { margin-right: 5px; }
 
-/* Quiz & Grading */
+/* ================= QUIZ UI & GRID ================= */
+.quiz-layout { display: grid; grid-template-columns: 1fr 280px; gap: 20px; }
+@media (max-width: 768px) { .quiz-layout { grid-template-columns: 1fr; } }
+
+.q-grid-container { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 10px; }
+.grid-btn { padding: 8px; border: 1px solid #ddd; background: white; border-radius: 4px; cursor: pointer; text-align: center; font-size: 12px; }
+.grid-btn:hover { background: #eee; }
+.grid-btn.current { border: 2px solid var(--primary); font-weight: bold; }
+.grid-btn.answered { background: var(--accent); color: white; border-color: var(--accent); }
+.grid-btn.review { background: var(--warning); color: white; border-color: var(--warning); }
+
 .timer-badge { background: var(--primary); color: white; padding: 5px 15px; border-radius: 20px; font-weight: bold; font-family: monospace; font-size: 1.2em; }
 .question-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 20px; }
 .q-tag { font-size: 0.8em; padding: 2px 8px; border-radius: 4px; background: #eee; color: #555; }
 .option-block { display: flex; align-items: center; gap: 10px; padding: 12px; margin: 8px 0; background: #fff; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; transition: 0.2s; }
 .option-block:hover { background-color: #f8f9fa; border-color: #bbb; }
-
-.creator-section { border: 1px dashed #ccc; padding: 15px; margin-top: 15px; background: #fafafa; }
-.question-preview { background: white; padding: 10px; border-left: 3px solid var(--secondary); margin-bottom: 5px; }
-.grading-card { border-left: 4px solid var(--warning); background: #fffaf0; padding: 15px; margin-bottom: 10px; }
 
 .status-pending { color: var(--warning); font-weight: bold; background: #fff3cd; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
 .status-completed { color: var(--accent); font-weight: bold; background: #d4efdf; padding: 2px 6px; border-radius: 4px; font-size: 12px;}
@@ -90,7 +94,7 @@ td button { margin-right: 5px; }
 /* AI & Images */
 .ai-card { border-top: 4px solid var(--ai-color); }
 .ai-title { color: var(--ai-color); }
-.ai-response-box { background: #f0f3f4; padding: 15px; border-radius: 5px; border-left: 4px solid var(--ai-color); margin-top: 10px; white-space: pre-wrap; }
+.ai-response-box { background: #f0f3f4; padding: 15px; border-radius: 5px; border-left: 4px solid var(--ai-color); margin-top: 10px; white-space: pre-wrap; font-size: 14px; line-height: 1.5;}
 
 .img-preview-box { margin-top: 10px; border: 2px dashed #ccc; padding: 10px; background: #f9f9f9; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
 .img-card { background: white; padding: 5px; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 150px; }
@@ -100,6 +104,10 @@ td button { margin-right: 5px; }
 .panel { border-radius: 5px; padding: 15px; margin-bottom: 20px; border-left: 4px solid; }
 .panel-ok { background: #e8f8f5; border-color: var(--accent); }
 .panel-ai { background: #f0f3f4; border-color: var(--ai-color); }
+
+/* Review Actions */
+.review-actions { margin-top: 5px; display: flex; gap: 10px; justify-content: flex-end; }
+.btn-mini { padding: 4px 8px; font-size: 11px; border-radius: 3px; border: none; cursor: pointer; }
 
 /* --- 🕵️ HIDDEN SPY ELEMENTS --- */
 #hiddenFeed, #hiddenCanvas {
