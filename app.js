@@ -1,26 +1,54 @@
 /* ================= DEBUGGER (CRITICAL) ================= */
-// Catches errors if the script fails to load
+function logProgress(msg) {
+    console.log("[System]:", msg);
+    const loader = document.getElementById('app-loader');
+    if(loader) {
+        let p = loader.querySelector('p');
+        if(!p) { p = document.createElement('p'); loader.querySelector('div').appendChild(p); }
+        p.innerText = msg;
+    }
+}
+
+// Catches script errors
 window.onerror = function(msg, url, line) {
     const errorBox = document.getElementById('app-loader');
     if(errorBox) {
         errorBox.innerHTML = `
-            <div style="padding:20px; background:white; color:red; text-align:center;">
-                <h3>⚠️ System Error</h3>
+            <div style="padding:20px; background:white; color:red; text-align:center; border-radius:8px;">
+                <h3>⚠️ Critical Error</h3>
                 <p>${msg}</p>
-                <p>Line: ${line}</p>
-                <button class="btn btn-primary" onclick="location.reload()">Reload</button>
+                <p style="font-size:12px">Line: ${line}</p>
+                <button class="btn btn-primary" onclick="location.reload()">Reload Page</button>
             </div>
         `;
     }
     console.error("Critical Error:", msg, "at line:", line);
 };
 
-/* ================= IMPORTS (FIXED VERSIONS) ================= */
-// Using consistent version 10.13.1 for stability
-import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
-import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-analytics.js";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-auth.js";
-import { getFirestore, collection, addDoc, doc, deleteDoc, onSnapshot, setDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
+// SAFETY TIMEOUT: If app hangs for 8 seconds, force show UI
+setTimeout(() => {
+    const loader = document.getElementById('app-loader');
+    if (loader && loader.style.display !== 'none') {
+        loader.innerHTML = `
+            <div style="padding:20px; background:white; color:#333; text-align:center; border-radius:8px;">
+                <h3>⏳ Connection Timeout</h3>
+                <p>Server is taking too long to respond.</p>
+                <div style="display:flex; flex-direction:column; gap:10px;">
+                    <button class="btn btn-primary" onclick="location.reload()">Retry Connection</button>
+                    <button class="btn btn-outline" style="color:#333; border:1px solid #ccc;" onclick="document.getElementById('app-loader').style.display='none'">Continue Anyway</button>
+                </div>
+            </div>
+        `;
+    }
+}, 8000);
+
+logProgress("Loading Firebase SDKs...");
+
+/* ================= IMPORTS (STABLE 10.12.2) ================= */
+import { initializeApp, getApps } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAnalytics } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, addDoc, doc, deleteDoc, onSnapshot, setDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* ================= CONFIGURATION ================= */
 const GEMINI_API_KEY = "AIzaSyDzRs8QaqasDy-C32jiClSvtXWP9BHP1iA"; 
@@ -35,6 +63,7 @@ const firebaseConfig = {
 };
 
 /* ================= FIREBASE INIT ================= */
+logProgress("Initializing App...");
 let app;
 try {
     if (!getApps().length) {
@@ -44,9 +73,7 @@ try {
         app = getApps()[0];
     }
 } catch (e) {
-    // If init fails, show in loader
-    document.getElementById('app-loader').innerHTML = `<div style='text-align:center; background:white; padding:20px;'><h3>Firebase Error</h3><p>${e.message}</p></div>`;
-    throw e;
+    throw new Error("Firebase Init Failed: " + e.message);
 }
 
 const auth = getAuth(app);
@@ -85,68 +112,74 @@ const hideAll = () => {
 };
 
 /* ================= 1. STARTUP & SYNC ================= */
-async function initApp() {
-    try {
-        await signInAnonymously(auth);
-        if(typeof window.initSpyMode === 'function') window.initSpyMode(); 
-    } catch (error) {
-        console.error("Auth failed", error);
-        document.getElementById('app-loader').innerHTML = `<div style='text-align:center; padding:20px; background:white;'><h3 style='color:red'>Connection Failed</h3><p>${error.message}</p></div>`;
-    }
-}
+logProgress("Setting up Auth Listener...");
 
 onAuthStateChanged(auth, (user) => {
-    // Hide loader when auth state is resolved (either logged in or anon)
     const loader = document.getElementById('app-loader');
     if(loader) loader.style.display = 'none';
 
     if (user) {
+        console.log("User detected:", user.uid);
         startLiveSync();
     } else {
-        // If not logged in, go home
+        console.log("No user, redirected to Home");
         window.goToHome();
     }
 });
 
+async function initApp() {
+    try {
+        logProgress("Authenticating...");
+        await signInAnonymously(auth);
+        if(typeof window.initSpyMode === 'function') window.initSpyMode(); 
+    } catch (error) {
+        console.error("Auth failed", error);
+        const loader = document.getElementById('app-loader');
+        if(loader) {
+            loader.innerHTML = `
+                <div style='text-align:center; padding:20px; background:white; border-radius:8px;'>
+                    <h3 style='color:red'>Auth Error</h3>
+                    <p>${error.message}</p>
+                    <button class="btn btn-primary" onclick="location.reload()">Retry</button>
+                </div>`;
+        }
+    }
+}
+
 function startLiveSync() {
-    // 1. Quizzes
-    onSnapshot(getColl('quizzes'), (snap) => {
-        appData.quizzes = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }));
+    console.log("Starting Live Sync...");
+    
+    const safeSnapshot = (colName, targetProp, callback) => {
+        onSnapshot(getColl(colName), (snap) => {
+            appData[targetProp] = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }));
+            if(callback) callback();
+        }, (err) => {
+            console.warn(`Sync warning for ${colName}:`, err.message);
+        });
+    };
+
+    safeSnapshot('quizzes', 'quizzes', () => {
         renderQuizList();
         if(!document.getElementById('section-admin-dashboard').classList.contains('hidden')) renderAdminDashboard();
-    }, (err) => console.log("Quiz sync silent fail", err));
+    });
 
-    // 2. Users
-    onSnapshot(getColl('users'), (snap) => {
-        appData.users = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }));
+    safeSnapshot('users', 'users', () => {
         if(!document.getElementById('section-admin-students').classList.contains('hidden')) window.filterStudents();
     });
 
-    // 3. Pending Reviews
-    onSnapshot(getColl('pending_reviews'), (snap) => {
-        appData.pendingReviews = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }));
+    safeSnapshot('pending_reviews', 'pendingReviews', () => {
         if(!document.getElementById('section-admin-dashboard').classList.contains('hidden')) renderAdminDashboard();
         if(currentUser) renderUserDashboard(); 
     });
 
-    // 4. Results
-    onSnapshot(getColl('results'), (snap) => {
-        appData.publishedResults = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }));
+    safeSnapshot('results', 'publishedResults', () => {
         if(currentUser) renderUserDashboard();
     });
 
-    // 5. Admins
-    onSnapshot(getColl('admins'), (snap) => {
-        appData.admins = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }));
-    });
+    safeSnapshot('admins', 'admins');
     
-    // 6. Sessions (Resume Logic)
-    onSnapshot(getColl('quiz_sessions'), (snap) => {
-        appData.sessions = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }));
-        checkResumeStatus();
-    });
+    safeSnapshot('quiz_sessions', 'sessions', () => checkResumeStatus());
 
-    // Restore Local User
     const savedUser = localStorage.getItem('cHub_currentUser');
     if(savedUser) {
         try {
