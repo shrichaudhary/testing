@@ -51,7 +51,7 @@
             </div>
             <div id="auth-form-login">
                 <h3>Student Login</h3>
-                <input type="email" id="loginEmail" class="input-field" placeholder="Email" autocomplete="username">
+                <input type="email" id="loginEmail" class="input-field" placeholder="Email or Username" autocomplete="username">
                 <input type="password" id="loginPass" class="input-field" placeholder="Password" autocomplete="current-password">
                 <button class="btn btn-primary" style="width:100%; margin-top:10px;" onclick="window.loginUser()">Login</button>
             </div>
@@ -117,7 +117,7 @@
         <div class="admin-top">
             <h2>👨‍🏫 Admin Dashboard (Live View)</h2>
             <div class="row">
-                <button class="btn btn-success" onclick="window.showQuizCreator()">+ Create Quiz</button>
+                <button class="btn btn-success" onclick="window.showQuizCreator()">+ Create Content</button>
                 <button class="btn btn-danger" onclick="window.logoutAdmin()">Logout</button>
             </div>
         </div>
@@ -148,6 +148,16 @@
                 <button class="btn btn-outline" style="color:#333; border-color:#333;" onclick="window.goToAdminDashboard()">Back to Dashboard</button>
             </div>
             
+            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #e0e0e0; margin-bottom: 20px;">
+                <h4 style="margin-top:0; color: #2c3e50;">➕ Add New Student Manually</h4>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <input type="email" id="newAdminStudentEmail" class="input-field" style="flex:1; min-width:200px;" placeholder="Student Email">
+                    <input type="text" id="newAdminStudentUser" class="input-field" style="flex:1; min-width:150px;" placeholder="Username">
+                    <input type="password" id="newAdminStudentPass" class="input-field" style="flex:1; min-width:150px;" placeholder="Password">
+                    <button class="btn btn-success" style="height: 40px; margin-top: 8px; padding: 0 20px;" onclick="window.addStudentByAdmin()">Add Student</button>
+                </div>
+            </div>
+
             <input type="text" id="student-search" class="input-field" placeholder="Search by username or email..." onkeyup="window.filterStudents()">
 
             <div class="table-container">
@@ -188,8 +198,7 @@
             </div>
 
             <h3>📝 Quiz History</h3>
-            <div id="profile-history-list" style="margin-top:10px;">
-                </div>
+            <div id="profile-history-list" style="margin-top:10px;"></div>
         </div>
     </div>
 
@@ -206,8 +215,7 @@
                 <button class="btn btn-primary" onclick="window.addNewAdmin()">Add</button>
             </div>
 
-            <div id="admin-list-display" style="margin-top:20px;">
-                </div>
+            <div id="admin-list-display" style="margin-top:20px;"></div>
         </div>
     </div>
 
